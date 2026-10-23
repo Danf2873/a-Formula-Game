@@ -275,7 +275,8 @@ export class AIDriver {
     }
 
     // ---- pure pursuit target
-    const Ld = 8 + 0.45 * Math.abs(speed);
+    // Shorter look-ahead at low speed so the car can turn out from behind a stopped car.
+    const Ld = (this.overtakeSide !== 0 && Math.abs(speed) < 15 ? 4 : 8) + 0.45 * Math.abs(speed);
     let tx: number, tz: number;
     let desiredLatNow = this.track.racingLineOffset(p.s) + this.tactical;
     if (pit.target) {
@@ -309,7 +310,7 @@ export class AIDriver {
     const cosH = fx * tFwd.x + fz * tFwd.z;
     const sinH = lx * tFwd.x + lz * tFwd.z; // + when the track tangent lies to the car's left
     let steerCmd = steerPP;
-    if (!pit.target && !facingAway) {
+    if (!pit.target && !facingAway && this.overtakeSide === 0) {
       const eLat = clamp(desiredLatNow - p.lateral, -3, 3);
       steerCmd += 0.012 * eLat;
       steerCmd += 0.06 * clamp(sinH, -0.4, 0.4) * (cosH > 0 ? 1 : 0);
@@ -362,7 +363,8 @@ export class AIDriver {
       // traction control
       const ws = tel.wheelSlip;
       const slip = ws && ws.length >= 4 ? Math.max(ws[2], ws[3]) : 0;
-      if (slip > 0.12) c.throttle *= Math.max(0.1, 1 - (slip - 0.12) * 6);
+      // wheelSlip is normalised (1 = peak grip); back off once the rears go past the peak
+      if (slip > 1.05) c.throttle *= Math.max(0.15, 1 - (slip - 1.05) * 2.5);
     }
     c.boost = rc.boost && c.throttle > 0.8;
     c.pitLimiter = pit.limiter;
@@ -396,15 +398,25 @@ export class AIDriver {
     const straight = Math.abs(curvature) < 0.002 && Math.abs(this.track.frameAt(p.s + 80).curvature) < 0.003;
     let overtaking = false;
 
+    // Only the nearest car directly ahead is the one to pass: deciding per car made the AI flip
+    // sides between two slow cars and stop halfway (e.g. behind idle cars on the grid).
+    let nearestId = '';
+    let nearestDs = Infinity;
+    for (const o of p.others) {
+      const ds = this.wrapDs(o.s - p.s);
+      if (ds > 0 && ds < nearestDs && Math.abs(o.lateral - p.lateral) < 2.3) { nearestDs = ds; nearestId = o.id; }
+    }
+
     for (const o of p.others) {
       const ds = this.wrapDs(o.s - p.s);
       const dl = o.lateral - p.lateral;
       if (ds > 0 && ds < 70) {
         const overlap = Math.abs(dl) < 2.3;
         if (overlap) {
-          cap = Math.min(cap, Math.max(0, o.speed + (ds - 9) * 0.5));
-          if (ds < 22 + 25 * this.aggression) {
-            if (this.overtakeId !== o.id || this.overtakeSide === 0) {
+          let c = Math.max(0, o.speed + (ds - 9) * 0.5);
+          if (o.id === nearestId && ds < 22 + 25 * this.aggression) {
+            // Keep the side already chosen while still passing; pick a new one only for a new car.
+            if (this.overtakeSide === 0 || (this.overtakeId !== o.id && this.overtakeHold <= 0)) {
               const roomL = halfW - o.lateral, roomR = halfW + o.lateral;
               this.overtakeSide = roomL >= roomR ? 1 : -1;
               this.overtakeId = o.id;
@@ -412,7 +424,11 @@ export class AIDriver {
             this.overtakeHold = 1.0;
             desiredLat = o.lateral + this.overtakeSide * 2.8;
             overtaking = true;
+            // Keep enough speed to steer out from behind a slow or stopped car (a car that
+            // brakes to a halt behind it can't move sideways), while there's a car length of room.
+            if (ds > 6.5) c = Math.max(c, o.speed + 4 + (ds - 6.5) * 0.4);
           }
+          cap = Math.min(cap, c);
         } else if (this.overtakeId === o.id && this.overtakeHold > 0 && ds < 40) {
           // keep going around until clear
           desiredLat = o.lateral + this.overtakeSide * 2.8;
@@ -420,7 +436,8 @@ export class AIDriver {
         }
         if (straight && Math.abs(dl) < 3.5 && ds > 3 && ds / Math.max(speed, 5) < 1 && p.telemetry.ersSoc > 0.3) boost = true;
       }
-      if (ds > -7 && ds <= 7 && Math.abs(dl) < 2.5) {
+      // Alongside = actually overlapping side by side (within about a car length).
+      if (ds > -5.5 && ds <= 5.5 && Math.abs(dl) < 2.5) {
         const dir = dl > 0.05 ? -1 : dl < -0.05 ? 1 : (o.id < this.driver.id ? 1 : -1);
         const need = 2.5 - Math.abs(dl) + 0.3;
         if (Math.abs(need) > Math.abs(pushLat)) pushLat = dir * need;
@@ -430,7 +447,9 @@ export class AIDriver {
     if (this.overtakeHold <= 0) { this.overtakeSide = 0; this.overtakeId = ''; }
 
     let target = 0;
-    if (pushLat !== 0) target = clamp(p.lateral + pushLat, -room, room) - rl;
+    // A car alongside must not push us back in behind the car we're passing.
+    const pushFightsPass = desiredLat !== null && pushLat !== 0 && Math.sign(pushLat) !== Math.sign(desiredLat - p.lateral);
+    if (pushLat !== 0 && !pushFightsPass) target = clamp(p.lateral + pushLat, -room, room) - rl;
     else if (desiredLat !== null) target = clamp(desiredLat, -room, room) - rl;
     if (Math.abs(curvature) > 0.01) target = clamp(target, -3, 3);
     const maxStep = 4 * dt;
@@ -459,7 +478,8 @@ export class AIDriver {
     const L = this.L;
     const vLim = Math.max(5, p.pitLimitKmh / 3.6 - 1);
     const dsEntry = (((pitData.entry * L - p.s) % L) + L) % L;
-    const Ld = 8 + 0.45 * Math.abs(speed);
+    // Shorter look-ahead at low speed so the car can turn out from behind a stopped car.
+    const Ld = (this.overtakeSide !== 0 && Math.abs(speed) < 15 ? 4 : 8) + 0.45 * Math.abs(speed);
 
     if (this.pitState === 'none') {
       if (p.wantPit && this.pitCooldown <= 0 && p.phase === 'running' && dsEntry < 450) {

@@ -1,6 +1,7 @@
 import './ui/styles.css';
 import type { CarSetup, Entry, SessionConfig, SessionSnapshot } from './types';
 import { Renderer } from './render/renderer';
+import { CAMERA_MODES } from './render/cameras';
 import { InputManager } from './input/inputManager';
 import { EngineAudio } from './audio/engineAudio';
 import { Hud } from './ui/hud';
@@ -209,22 +210,41 @@ function defaultSetupFor(c: SessionConfig): CarSetup {
 // ------------------------------------------------------------ main loop
 
 let last = performance.now();
-function loop(now: number): void {
-  const dt = Math.min(0.1, (now - last) / 1000);
+function tick(now: number, draw: boolean): void {
+  const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
   last = now;
   if (world) {
     const polled = input.poll(dt, world.playerSpeedKmh());
-    if (input.consumeKey('KeyT')) telemetry.toggle();
-    if (input.consumeKey('KeyR')) world.resetPlayer();
-    if (polled.ui.pause) togglePause();
+    if (draw) {
+      if (input.consumeKey('KeyT')) telemetry.toggle();
+      if (input.consumeKey('KeyR')) world.resetPlayer();
+      if (input.consumeKey('KeyV')) { world.cameraRig.cycle(-1); world.cameraChanged = true; }
+      for (let i = 0; i < CAMERA_MODES.length && i < 10; i++) {
+        if (input.consumeKey(i === 9 ? 'Digit0' : 'Digit' + (i + 1))) { world.cameraRig.setMode(CAMERA_MODES[i].mode); world.cameraChanged = true; }
+      }
+      if (polled.ui.pause) togglePause();
+    }
     world.paused = pause.isOpen && !mp;   // multiplayer never pauses the simulation
-    world.frame(dt, now, polled);
-  } else {
+    world.frame(dt, now, polled, draw);
+  } else if (draw) {
     input.poll(dt, 0);
     renderer.render();
   }
+}
+
+function loop(now: number): void {
+  if (!document.hidden) tick(now, true);
   requestAnimationFrame(loop);
 }
+
+// Browsers stop requestAnimationFrame in hidden tabs. In multiplayer the simulation must keep
+// running (the host runs the race for everyone), so a worker timer drives it while hidden.
+const bgTicker = new Worker(URL.createObjectURL(new Blob(
+  ['setInterval(() => postMessage(0), 16);'], { type: 'text/javascript' })));
+bgTicker.onmessage = () => {
+  if (document.hidden && mp && world) tick(performance.now(), false);
+};
+document.addEventListener('visibilitychange', () => { last = performance.now(); });
 
 function togglePause(): void {
   if (!world || !worldArgs) return;

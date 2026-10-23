@@ -29,16 +29,16 @@ describe('applyAssists', () => {
   });
   it('traction control reduces throttle under rear slip', () => {
     const s = { ...defaultSettings(), tractionControl: 1 };
-    const out = applyAssists(ctl(), tel({ wheelSlip: [0, 0, 0.4, 0.4] }), s, newAssistState());
+    const out = applyAssists(ctl(), tel({ wheelSlip: [0, 0, 1.5, 1.5] }), s, newAssistState());
     expect(out.throttle).toBeLessThan(0.5);
-    const off = applyAssists(ctl(), tel({ wheelSlip: [0, 0, 0.4, 0.4] }), { ...s, tractionControl: 0 }, newAssistState());
+    const off = applyAssists(ctl(), tel({ wheelSlip: [0, 0, 1.5, 1.5] }), { ...s, tractionControl: 0 }, newAssistState());
     expect(off.throttle).toBe(1);
   });
   it('ABS reduces brake under front slip', () => {
     const s = { ...defaultSettings(), absAssist: true };
-    const out = applyAssists(ctl({ throttle: 0, brake: 1 }), tel({ wheelSlip: [0.5, 0.5, 0, 0] }), s, newAssistState());
+    const out = applyAssists(ctl({ throttle: 0, brake: 1 }), tel({ wheelSlip: [1.6, 1.6, 0, 0] }), s, newAssistState());
     expect(out.brake).toBeLessThan(0.6);
-    const none = applyAssists(ctl({ throttle: 0, brake: 1 }), tel({ wheelSlip: [0.05, 0.05, 0, 0] }), s, newAssistState());
+    const none = applyAssists(ctl({ throttle: 0, brake: 1 }), tel({ wheelSlip: [0.5, 0.5, 0, 0] }), s, newAssistState());
     expect(none.brake).toBe(1);
   });
 });

@@ -15,8 +15,9 @@ const defaultState = newAssistState();
 export const AUTO_UPSHIFT_RPM = 11200;
 export const AUTO_DOWNSHIFT_RPM = 6800;
 const SHIFT_DEBOUNCE_S = 0.4;
-const TC_SLIP_THRESHOLD = 0.12;
-const ABS_SLIP_THRESHOLD = 0.15;
+// Telemetry.wheelSlip is normalised: 1.0 = the tyre's peak-grip slip.
+const TC_SLIP_THRESHOLD = 1.0;
+const ABS_SLIP_THRESHOLD = 1.05;
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
@@ -39,7 +40,8 @@ export function applyAssists(
       if (t.gear === 0 && c.throttle > 0.05) {
         out.shiftUp = true;
         st.shiftCooldown = SHIFT_DEBOUNCE_S;
-      } else if (t.gear >= 1 && t.gear < 8 && t.rpm > AUTO_UPSHIFT_RPM) {
+      } else if (t.gear >= 1 && t.gear < 8 && t.rpm > AUTO_UPSHIFT_RPM && rearSlip(t) < 1.6) {
+        // (no upshifts while the rear wheels spin: high revs there aren't road speed)
         out.shiftUp = true;
         st.shiftCooldown = SHIFT_DEBOUNCE_S;
       } else if (t.gear > 1 && t.rpm < AUTO_DOWNSHIFT_RPM) {
@@ -51,12 +53,14 @@ export function applyAssists(
     st.shiftCooldown = 0.1;
   }
 
-  // Traction control: cut throttle when rear wheels slip
+  // Traction control: cut throttle when rear wheels slip (tractionControl 1 = 100%)
   const tc = clamp01(s.tractionControl);
   if (tc > 0 && out.throttle > 0 && t.wheelSlip.length >= 4) {
     const rear = Math.max(t.wheelSlip[2], t.wheelSlip[3]);
-    if (rear > TC_SLIP_THRESHOLD) {
-      const excess = clamp01((rear - TC_SLIP_THRESHOLD) * 4);
+    // Lower TC settings let the rears run further past the peak before cutting in.
+    const threshold = TC_SLIP_THRESHOLD + (1 - tc) * 0.8;
+    if (rear > threshold) {
+      const excess = clamp01((rear - threshold) * 2.5);
       out.throttle = out.throttle * (1 - 0.9 * tc * excess);
     }
   }
@@ -65,7 +69,7 @@ export function applyAssists(
   if (s.absAssist && out.brake > 0 && t.wheelSlip.length >= 2) {
     const front = Math.max(t.wheelSlip[0], t.wheelSlip[1]);
     if (front > ABS_SLIP_THRESHOLD) {
-      const excess = clamp01((front - ABS_SLIP_THRESHOLD) * 4);
+      const excess = clamp01((front - ABS_SLIP_THRESHOLD) * 2.5);
       out.brake = out.brake * (1 - 0.7 * excess);
     }
   }
@@ -74,9 +78,13 @@ export function applyAssists(
   const sa = clamp01(s.steeringAssist);
   if (sa > 0 && t.wheelSlip.length >= 2) {
     const front = (t.wheelSlip[0] + t.wheelSlip[1]) / 2;
-    if (front > 0.2) {
-      out.steer = out.steer * (1 - 0.5 * sa * clamp01((front - 0.2) * 2));
+    if (front > 1.1) {
+      out.steer = out.steer * (1 - 0.5 * sa * clamp01((front - 1.1) * 1.5));
     }
   }
   return out;
+}
+
+function rearSlip(t: Telemetry): number {
+  return t.wheelSlip.length >= 4 ? Math.max(t.wheelSlip[2], t.wheelSlip[3]) : 0;
 }

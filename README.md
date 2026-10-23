@@ -22,7 +22,9 @@ A low-poly Formula 1 racing sim that runs in the browser. It covers all 24 circu
 | Shift up / down | E / Q |
 | Boost (ERS override) | Space |
 | Pit limiter | L |
-| Camera / look back | C / B |
+| Next / previous camera | C / V |
+| Pick a camera directly | 1–9, 0 |
+| Look back | B |
 | Telemetry | T |
 | Reset car to track | R |
 | Pause | Esc |

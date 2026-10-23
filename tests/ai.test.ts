@@ -254,7 +254,7 @@ describe('AIDriver', () => {
     const p = perception(track, car);
     const full = ai.update(1 / 60, p).throttle;
     const ai2 = new AIDriver(track, DRIVER, 1, 2, { mu: MU, downforceFactor: 0 });
-    p.telemetry.wheelSlip = [0, 0, 0.3, 0.3];
+    p.telemetry.wheelSlip = [0, 0, 1.6, 1.6];
     const slipped = ai2.update(1 / 60, p).throttle;
     expect(full).toBeGreaterThan(0);
     expect(slipped).toBeLessThan(full);

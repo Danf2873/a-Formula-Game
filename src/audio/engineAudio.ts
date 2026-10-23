@@ -137,7 +137,7 @@ export class EngineAudio {
 
     const slips = t.wheelSlip ?? [];
     const skid = slips.length ? Math.max(...slips) : 0;
-    const sqv = t.speedKmh > 15 ? Math.max(0, Math.min(1, (skid - 0.25) * 2)) : 0;
+    const sqv = t.speedKmh > 15 ? Math.max(0, Math.min(1, (skid - 0.9) * 1.2)) : 0;
     this.squealGain.gain.setTargetAtTime(sqv * 0.25, now, 0.05);
 
     let rough = 0;

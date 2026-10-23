@@ -3,16 +3,41 @@ import * as THREE from 'three';
 import type { CarPose } from '../types';
 import { CAR_ANCHORS } from './carMesh';
 
-export type CameraMode = 'chase' | 'tcam' | 'cockpit' | 'nose' | 'tv';
+export type CameraMode =
+  | 'chase' | 'chaseFar' | 'chaseFixed' | 'chaseHigh' | 'heli'
+  | 'tcam' | 'cockpit' | 'helmet' | 'nose' | 'wheel' | 'rear' | 'tv';
 
-const MODES: CameraMode[] = ['chase', 'tcam', 'cockpit', 'nose', 'tv'];
+/** Cycle order and on-screen names. */
+export const CAMERA_MODES: { mode: CameraMode; label: string }[] = [
+  { mode: 'chase', label: 'Chase' },
+  { mode: 'chaseFar', label: 'Chase (far)' },
+  { mode: 'chaseFixed', label: 'Chase (locked)' },
+  { mode: 'chaseHigh', label: 'Chase (high)' },
+  { mode: 'heli', label: 'Helicopter' },
+  { mode: 'tcam', label: 'T-cam' },
+  { mode: 'cockpit', label: 'Cockpit' },
+  { mode: 'helmet', label: 'Helmet' },
+  { mode: 'nose', label: 'Nose' },
+  { mode: 'wheel', label: 'Wheel' },
+  { mode: 'rear', label: 'Rear-facing' },
+  { mode: 'tv', label: 'TV' },
+];
 
-const CHASE_BACK = 6.5;
-const CHASE_UP = 2.2;
+/** Spring-follow chase variants: distance back, height, look-ahead, yaw stiffness (Infinity = locked). */
+const CHASE: Record<string, { back: number; up: number; ahead: number; lookUp: number; yawK: number; fov: number; fovGain: number }> = {
+  chase: { back: 6.5, up: 2.2, ahead: 4, lookUp: 1.0, yawK: 4, fov: 62, fovGain: 22 },
+  chaseFar: { back: 11, up: 3.4, ahead: 6, lookUp: 1.0, yawK: 3, fov: 58, fovGain: 16 },
+  chaseFixed: { back: 7, up: 2.0, ahead: 6, lookUp: 0.9, yawK: Infinity, fov: 64, fovGain: 18 },
+  chaseHigh: { back: 9, up: 6.5, ahead: 4, lookUp: 0.4, yawK: 4, fov: 60, fovGain: 10 },
+  heli: { back: 14, up: 26, ahead: 10, lookUp: 0, yawK: 2, fov: 50, fovGain: 0 },
+};
+
 const TV_ASIDE = 15;
 const TV_UP = 6;
 const TV_LEAD = 110;      // how far ahead of the car a new spot is placed
 const TV_REPLACE = 250;   // re-place when the car is further than this
+
+const STORAGE_KEY = 'f1.camera';
 
 const damp = (k: number, dt: number): number => 1 - Math.exp(-k * dt);
 
@@ -35,6 +60,8 @@ export class CameraRig {
   private tvSpot = new THREE.Vector3();
   private tvHas = false;
   private tvSide = 1;
+  private headSway = new THREE.Vector3();   // helmet cam g-force lean
+  private lastVel = new THREE.Vector3();
 
   private fwd = new THREE.Vector3();
   private tmp = new THREE.Vector3();
@@ -42,20 +69,41 @@ export class CameraRig {
   private tmpQ = new THREE.Quaternion();
   private flipQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
   private lbQ = new THREE.Quaternion();
-  private up = new THREE.Vector3(0, 1, 0);
+  private invQ = new THREE.Quaternion();
+
+  // Local (car-frame) mount points: +X left, +Y up, +Z forward.
+  private tcamEye = new THREE.Vector3(0, CAR_ANCHORS.airbox.y + 0.15, CAR_ANCHORS.airbox.z - 0.1);
+  private cockpitEye = new THREE.Vector3(0, 0.9, 0.02);       // just ahead of the helmet, over the halo
+  private helmetEye = new THREE.Vector3(0, 0.84, -0.06);      // inside the helmet: sees the halo and mirrors
+  private noseEye = new THREE.Vector3(0, CAR_ANCHORS.nose.y + 0.1, CAR_ANCHORS.nose.z + 0.1);
+  private wheelEye = new THREE.Vector3(0.62, 0.55, 0.55);     // left sidepod, looking at the front-left tyre
+  private rearEye = new THREE.Vector3(0, 0.95, -2.05);        // on the rear wing, facing backwards
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY) as CameraMode | null;
+      if (saved && CAMERA_MODES.some((m) => m.mode === saved)) this.mode = saved;
+    } catch { /* storage unavailable */ }
   }
 
-  cycle(): void {
-    this.setMode(MODES[(MODES.indexOf(this.mode) + 1) % MODES.length]);
+  get label(): string {
+    return CAMERA_MODES.find((m) => m.mode === this.mode)?.label ?? this.mode;
+  }
+
+  /** Next (dir 1) or previous (dir -1) camera. Returns the new camera's label. */
+  cycle(dir: 1 | -1 = 1): string {
+    const i = CAMERA_MODES.findIndex((m) => m.mode === this.mode);
+    const n = CAMERA_MODES.length;
+    this.setMode(CAMERA_MODES[(i + dir + n) % n].mode);
+    return this.label;
   }
 
   setMode(m: CameraMode): void {
     this.mode = m;
     this.snap = true;
     this.tvHas = false;
+    try { localStorage.setItem(STORAGE_KEY, m); } catch { /* storage unavailable */ }
   }
 
   /** Force the next update to jump straight to the target (e.g. after a teleport / restart). */
@@ -75,51 +123,49 @@ export class CameraRig {
 
     this.lookBackAmt += ((lookBack ? 1 : 0) - this.lookBackAmt) * (snap ? 1 : damp(12, dt));
     const lb = this.lookBackAmt;
+    const speed01 = Math.min(Math.max(speedKmh, 0), 350) / 350;
     let targetFov = 70;
 
     switch (this.mode) {
-      case 'chase': {
-        if (snap) this.chaseYaw = carYaw;
-        else this.chaseYaw = carYaw - wrapPi(carYaw - this.chaseYaw) * Math.exp(-4 * dt);
-        const yaw = this.chaseYaw + Math.PI * lb;
-        const sx = Math.sin(yaw), cz = Math.cos(yaw);
-        // desired camera spot: behind the (smoothed) heading, above the car
-        this.tmp.set(
-          pose.position.x - sx * CHASE_BACK,
-          pose.position.y + CHASE_UP,
-          pose.position.z - cz * CHASE_BACK,
-        );
-        if (snap) this.pos.copy(this.tmp);
-        else this.pos.lerp(this.tmp, damp(14, dt));
-        this.pos.y = Math.max(this.pos.y, pose.position.y + 0.5);
-        this.tmp2.set(pose.position.x + sx * 4, pose.position.y + 1.0, pose.position.z + cz * 4);
-        if (snap) this.look.copy(this.tmp2);
-        else this.look.lerp(this.tmp2, damp(18, dt));
-        this.camera.position.copy(this.pos);
-        this.camera.lookAt(this.look);
-        targetFov = 62 + Math.min(Math.max(speedKmh, 0), 350) / 350 * 22;
+      case 'chase':
+      case 'chaseFar':
+      case 'chaseFixed':
+      case 'chaseHigh':
+      case 'heli': {
+        const c = CHASE[this.mode];
+        this.chaseFollow(dt, pose, carYaw, lb, snap, c);
+        targetFov = c.fov + speed01 * c.fovGain;
         break;
       }
-      case 'tcam': {
-        this.rigid(pose, new THREE.Vector3(0, CAR_ANCHORS.airbox.y + 0.15, CAR_ANCHORS.airbox.z - 0.1), lb);
-        targetFov = 80 + Math.min(Math.max(speedKmh, 0), 350) / 350 * 8;
+      case 'tcam':
+        this.rigid(pose, this.tcamEye, lb);
+        targetFov = 80 + speed01 * 8;
         break;
-      }
-      case 'cockpit': {
+      case 'cockpit':
         this.rigid(pose, this.cockpitEye, lb);
         targetFov = 88;
         break;
-      }
-      case 'nose': {
+      case 'helmet':
+        this.helmet(dt, pose, lb, snap);
+        targetFov = 92;
+        break;
+      case 'nose':
         this.rigid(pose, this.noseEye, lb);
         targetFov = 85;
         break;
-      }
-      case 'tv': {
+      case 'wheel':
+        this.rigid(pose, this.wheelEye, lb);
+        targetFov = 78;
+        break;
+      case 'rear':
+        // Mounted facing backwards; "look back" turns it to face forwards.
+        this.rigid(pose, this.rearEye, 1 - lb);
+        targetFov = 75;
+        break;
+      case 'tv':
         this.updateTv(dt, pose, snap);
         targetFov = this.fov; // set by tv logic
         break;
-      }
     }
 
     // FOV smoothing
@@ -130,15 +176,49 @@ export class CameraRig {
     }
   }
 
-  // Cockpit eye: just ahead of the helmet (helmet centre z=-0.14, r=0.12), looking over the halo.
-  private cockpitEye = new THREE.Vector3(0, 0.9, 0.02);
-  // Nose camera sits above the nose, behind the tip.
-  private noseEye = new THREE.Vector3(0, CAR_ANCHORS.nose.y + 0.1, CAR_ANCHORS.nose.z + 0.1);
+  private chaseFollow(dt: number, pose: CarPose, carYaw: number, lb: number, snap: boolean,
+                      c: { back: number; up: number; ahead: number; lookUp: number; yawK: number }): void {
+    const locked = !Number.isFinite(c.yawK);
+    if (snap || locked) this.chaseYaw = carYaw;
+    else this.chaseYaw = carYaw - wrapPi(carYaw - this.chaseYaw) * Math.exp(-c.yawK * dt);
+    const yaw = this.chaseYaw + Math.PI * lb;
+    const sx = Math.sin(yaw), cz = Math.cos(yaw);
+    // desired camera spot: behind the (smoothed) heading, above the car
+    this.tmp.set(pose.position.x - sx * c.back, pose.position.y + c.up, pose.position.z - cz * c.back);
+    if (snap || locked) this.pos.copy(this.tmp);
+    else this.pos.lerp(this.tmp, damp(14, dt));
+    this.pos.y = Math.max(this.pos.y, pose.position.y + 0.5);
+    this.tmp2.set(pose.position.x + sx * c.ahead, pose.position.y + c.lookUp, pose.position.z + cz * c.ahead);
+    if (snap || locked) this.look.copy(this.tmp2);
+    else this.look.lerp(this.tmp2, damp(18, dt));
+    this.camera.position.copy(this.pos);
+    this.camera.lookAt(this.look);
+  }
+
+  /** Driver's-eye view with the head leaning against braking/cornering g-forces. */
+  private helmet(dt: number, pose: CarPose, lb: number, snap: boolean): void {
+    // Acceleration in the car frame from the velocity change.
+    const acc = this.tmp2.copy(pose.velocity).sub(this.lastVel).divideScalar(Math.max(dt, 1e-3));
+    this.lastVel.copy(pose.velocity);
+    this.invQ.copy(pose.quaternion).invert();
+    acc.applyQuaternion(this.invQ);
+    // Head moves opposite to the acceleration (~1 cm per g, capped).
+    const g = 9.81;
+    const target = this.tmp.set(
+      THREE.MathUtils.clamp(-acc.x / g * 0.012, -0.05, 0.05),
+      0,
+      THREE.MathUtils.clamp(-acc.z / g * 0.01, -0.05, 0.05),
+    );
+    if (snap) this.headSway.set(0, 0, 0);
+    else this.headSway.lerp(target, damp(6, dt));
+    this.tmp.copy(this.helmetEye).add(this.headSway);
+    this.rigid(pose, this.tmp, lb);
+  }
 
   /** Camera rigidly attached to the car at a local offset (looking forward, or back when lookBack). */
   private rigid(pose: CarPose, local: THREE.Vector3, lb: number): void {
-    this.tmp.copy(local).applyQuaternion(pose.quaternion).add(pose.position);
-    this.camera.position.copy(this.tmp);
+    const p = this.tmp.copy(local).applyQuaternion(pose.quaternion).add(pose.position);
+    this.camera.position.copy(p);
     // camera looks along -Z; car forward is +Z -> flip 180 about Y, plus lookBack blend
     this.lbQ.identity().slerp(this.flipQ, lb);
     this.tmpQ.copy(pose.quaternion).multiply(this.flipQ).multiply(this.lbQ);

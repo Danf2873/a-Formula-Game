@@ -28,7 +28,7 @@ export function defaultSettings(): InputSettings {
   return {
     device: 'auto', steerSensitivity: 1, steerLinearity: 1.4, deadzone: 0.08,
     wheelRotationDeg: 900, invertThrottle: false, invertBrake: false, combinedPedals: false,
-    bindings: {}, autoGearbox: false, tractionControl: 0.5, absAssist: true, steeringAssist: 0.3,
+    bindings: {}, autoGearbox: true, tractionControl: 1, absAssist: true, steeringAssist: 0.3,
     wheelLockDeg: 95,
   };
 }

@@ -92,6 +92,8 @@ export class World {
   readonly cameraRig: CameraRig;
   player: Racer | null = null;
   paused = false;
+  /** Set by main.ts when the camera is changed outside polled UI actions (V / number keys). */
+  cameraChanged = false;
   /** Player's pit plan (set from the pause menu). */
   pitPlan: { compound: TyreCompound; fuelKg: number } = { compound: 'medium', fuelKg: 0 };
 
@@ -322,11 +324,13 @@ export class World {
     return this.player?.car ? Math.abs(this.player.car.forwardSpeed()) * 3.6 : 0;
   }
 
-  frame(dtSec: number, nowMs: number, polled: ReturnType<InputManager['poll']>): void {
+  /** `draw` is false for background ticks (hidden tab): simulate and network, but skip rendering. */
+  frame(dtSec: number, nowMs: number, polled: ReturnType<InputManager['poll']>, draw = true): void {
     const { renderer, hud, telemetry, audio } = this.deps;
     const player = this.player;
     const playerSpeed = this.playerSpeedKmh();
-    if (polled.ui.camera) this.cameraRig.cycle();
+    if (polled.ui.camera) this.cameraRig.cycle(1);
+    if (polled.ui.camera || this.cameraChanged) { this.cameraChanged = false; hud.message('Camera: ' + this.cameraRig.label, 1200); }
 
     if (!this.paused) {
       dtSec = Math.min(dtSec, 0.1);
@@ -349,6 +353,13 @@ export class World {
       this.updateNet(nowMs);
     }
 
+    const snap = this.session.snapshot();
+    if ((snap.phase === 'finished') && !this.finishedFired) {
+      this.finishedFired = true;
+      this.opts.onFinished?.(snap);
+    }
+    if (!draw) return;
+
     // Visuals
     for (const r of this.racers) {
       if (r.car) r.visual.update(r.car.pose, { brake: r.car.telemetry.brake, compound: r.car.tyres[0].compound, rainLight: this.weather.state.rain > 0.1 });
@@ -366,16 +377,11 @@ export class World {
     }
     renderer.render();
 
-    const snap = this.session.snapshot();
     const t = player?.car?.telemetry;
     if (t) {
       hud.update(snap, this.opts.entries, player!.entry.id, t, this.weather.state, this.liveDelta());
       telemetry.push(t, player!.proj.s);
       audio.update(t);
-    }
-    if ((snap.phase === 'finished') && !this.finishedFired) {
-      this.finishedFired = true;
-      this.opts.onFinished?.(snap);
     }
   }
 
