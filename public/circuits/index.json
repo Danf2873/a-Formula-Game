@@ -1,0 +1,194 @@
+[
+  {
+    "id": "melbourne",
+    "round": 1,
+    "name": "Albert Park Circuit",
+    "grandPrix": "Australian Grand Prix",
+    "country": "Australia",
+    "realLengthM": 5278
+  },
+  {
+    "id": "shanghai",
+    "round": 2,
+    "name": "Shanghai International Circuit",
+    "grandPrix": "Chinese Grand Prix",
+    "country": "China",
+    "realLengthM": 5451
+  },
+  {
+    "id": "suzuka",
+    "round": 3,
+    "name": "Suzuka International Racing Course",
+    "grandPrix": "Japanese Grand Prix",
+    "country": "Japan",
+    "realLengthM": 5807
+  },
+  {
+    "id": "bahrain",
+    "round": 4,
+    "name": "Bahrain International Circuit",
+    "grandPrix": "Bahrain Grand Prix",
+    "country": "Bahrain",
+    "realLengthM": 5412
+  },
+  {
+    "id": "jeddah",
+    "round": 5,
+    "name": "Jeddah Corniche Circuit",
+    "grandPrix": "Saudi Arabian Grand Prix",
+    "country": "Saudi Arabia",
+    "realLengthM": 6174
+  },
+  {
+    "id": "miami",
+    "round": 6,
+    "name": "Miami International Autodrome",
+    "grandPrix": "Miami Grand Prix",
+    "country": "USA",
+    "realLengthM": 5412
+  },
+  {
+    "id": "montreal",
+    "round": 7,
+    "name": "Circuit Gilles Villeneuve",
+    "grandPrix": "Canadian Grand Prix",
+    "country": "Canada",
+    "realLengthM": 4361
+  },
+  {
+    "id": "monaco",
+    "round": 8,
+    "name": "Circuit de Monaco",
+    "grandPrix": "Monaco Grand Prix",
+    "country": "Monaco",
+    "realLengthM": 3337
+  },
+  {
+    "id": "barcelona",
+    "round": 9,
+    "name": "Circuit de Barcelona-Catalunya",
+    "grandPrix": "Barcelona-Catalunya Grand Prix",
+    "country": "Spain",
+    "realLengthM": 4657
+  },
+  {
+    "id": "spielberg",
+    "round": 10,
+    "name": "Red Bull Ring",
+    "grandPrix": "Austrian Grand Prix",
+    "country": "Austria",
+    "realLengthM": 4318
+  },
+  {
+    "id": "silverstone",
+    "round": 11,
+    "name": "Silverstone Circuit",
+    "grandPrix": "British Grand Prix",
+    "country": "United Kingdom",
+    "realLengthM": 5891
+  },
+  {
+    "id": "spa",
+    "round": 12,
+    "name": "Circuit de Spa-Francorchamps",
+    "grandPrix": "Belgian Grand Prix",
+    "country": "Belgium",
+    "realLengthM": 7004
+  },
+  {
+    "id": "hungaroring",
+    "round": 13,
+    "name": "Hungaroring",
+    "grandPrix": "Hungarian Grand Prix",
+    "country": "Hungary",
+    "realLengthM": 4381
+  },
+  {
+    "id": "zandvoort",
+    "round": 14,
+    "name": "Circuit Zandvoort",
+    "grandPrix": "Dutch Grand Prix",
+    "country": "Netherlands",
+    "realLengthM": 4259
+  },
+  {
+    "id": "monza",
+    "round": 15,
+    "name": "Autodromo Nazionale Monza",
+    "grandPrix": "Italian Grand Prix",
+    "country": "Italy",
+    "realLengthM": 5793
+  },
+  {
+    "id": "madrid",
+    "round": 16,
+    "name": "Madring",
+    "grandPrix": "Spanish Grand Prix",
+    "country": "Spain",
+    "realLengthM": 5474
+  },
+  {
+    "id": "baku",
+    "round": 17,
+    "name": "Baku City Circuit",
+    "grandPrix": "Azerbaijan Grand Prix",
+    "country": "Azerbaijan",
+    "realLengthM": 6003
+  },
+  {
+    "id": "singapore",
+    "round": 18,
+    "name": "Marina Bay Street Circuit",
+    "grandPrix": "Singapore Grand Prix",
+    "country": "Singapore",
+    "realLengthM": 4940
+  },
+  {
+    "id": "austin",
+    "round": 19,
+    "name": "Circuit of the Americas",
+    "grandPrix": "United States Grand Prix",
+    "country": "USA",
+    "realLengthM": 5513
+  },
+  {
+    "id": "mexico",
+    "round": 20,
+    "name": "Autodromo Hermanos Rodriguez",
+    "grandPrix": "Mexico City Grand Prix",
+    "country": "Mexico",
+    "realLengthM": 4304
+  },
+  {
+    "id": "interlagos",
+    "round": 21,
+    "name": "Autodromo Jose Carlos Pace",
+    "grandPrix": "Sao Paulo Grand Prix",
+    "country": "Brazil",
+    "realLengthM": 4309
+  },
+  {
+    "id": "lasvegas",
+    "round": 22,
+    "name": "Las Vegas Strip Circuit",
+    "grandPrix": "Las Vegas Grand Prix",
+    "country": "USA",
+    "realLengthM": 6201
+  },
+  {
+    "id": "lusail",
+    "round": 23,
+    "name": "Lusail International Circuit",
+    "grandPrix": "Qatar Grand Prix",
+    "country": "Qatar",
+    "realLengthM": 5419
+  },
+  {
+    "id": "abudhabi",
+    "round": 24,
+    "name": "Yas Marina Circuit",
+    "grandPrix": "Abu Dhabi Grand Prix",
+    "country": "UAE",
+    "realLengthM": 5281
+  }
+]

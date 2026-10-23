@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A Formula Game</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700;900&display=swap" rel="stylesheet" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      #game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+      #ui { position: fixed; inset: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="ui"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
