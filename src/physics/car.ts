@@ -109,6 +109,19 @@ const ERS_EFFICIENCY = 0.85;
 const COAST_REGEN_FORCE_N = 2500;
 const FUEL_FLOW_MAX = 0.025;    // kg/s at full throttle and high revs (~90 kg/h)
 const BODY_E = 0.2;
+/** Lateral tyre forces act this fraction of the way from the contact patch up to the CG (suspension roll
+ *  centre / jacking geometry). Without it the tyres' grip exceeds the car's static rollover threshold
+ *  (half-track / CG height ~ 2.9 g) and a car on fresh softs tips over in a hard corner. */
+const ROLL_CENTRE_FRAC = 0.5;
+/** Body points (local, relative to the CG) that collide with the ground if the car rolls or lands badly. */
+const BODY_POINTS: [number, number, number][] = [
+  [0.85, -0.12, 0.6], [-0.85, -0.12, 0.6], [0.85, -0.12, -0.9], [-0.85, -0.12, -0.9],    // floor / sidepod edges
+  [0.98, 0.15, 1.9], [-0.98, 0.15, 1.9], [0.98, 0.15, -1.5], [-0.98, 0.15, -1.5],        // wheel tops
+  [0, -0.1, 2.9], [0, 0.5, 0.4], [0, 0.75, -0.3], [0, 0.65, -2.1],                      // nose, halo, roll hoop, rear wing
+  [0.45, 0.4, -0.7], [-0.45, 0.4, -0.7],                                                  // engine cover
+];
+const GROUND_E = 0.1;
+const GROUND_MU = 0.6;
 
 const DEG = Math.PI / 180;
 
@@ -187,6 +200,7 @@ export class Car {
   private superClip = false;
   private lastLatG = 0; private lastLongG = 0;
   private lastGround: GroundSample | null = null;
+  private bodyHints = BODY_POINTS.map(() => ({ idx: 0 }));
 
   constructor(opts: { setup: CarSetup; performance: TeamPerformance; params?: Partial<CarParams> }) {
     this.p = { ...DEFAULT_CAR_PARAMS, ...(opts.params ?? {}) };
@@ -677,7 +691,11 @@ export class Car {
       }
       // normal force
       tfx += nx * N; tfy += ny * N; tfz += nz * N;
-      this.addForce(tfx, tfy, tfz, w.cpx, w.cpy, w.cpz);
+      // the lateral tyre force acts at the roll centre, partway up towards the CG
+      const lfx = wlx * f.fy, lfy = wly * f.fy, lfz = wlz * f.fy;
+      const lift = ROLL_CENTRE_FRAC * ((this.px - w.cpx) * eyx + (this.py - w.cpy) * eyy + (this.pz - w.cpz) * eyz);
+      this.addForce(tfx - lfx, tfy - lfy, tfz - lfz, w.cpx, w.cpy, w.cpz);
+      this.addForce(lfx, lfy, lfz, w.cpx + eyx * lift, w.cpy + eyy * lift, w.cpz + eyz * lift);
       this.sumLat += tfx * exx + tfy * exy + tfz * exz;
       this.sumLong += tfx * ezx + tfy * ezy + tfz * ezz;
 
@@ -731,8 +749,9 @@ export class Car {
       this.qx *= inv; this.qy *= inv; this.qz *= inv; this.qw *= inv;
     }
 
-    // ---- barriers
+    // ---- barriers and body-ground contact
     this.barriers(ground);
+    this.bodyGround(ground);
 
     // ---- rest damping (kills micro-creep when parked)
     if (nContact === 4 && throttle < 0.01 && Math.hypot(this.vx, this.vz) < 0.05 && Math.abs(this.wy) < 0.02) {
@@ -799,6 +818,37 @@ export class Car {
         const invT = this.invMassAlong(wx, wy, wz, tux, 0, tuz);
         const jt = Math.min(0.4 * jn, tl / invT);
         this.impulseAt(-tux * jt, 0, -tuz * jt, rx, ry, rz);
+      }
+    }
+  }
+
+  /** Keeps the chassis out of the ground (the wheels are rays, so a rolled car would otherwise sink through). */
+  private bodyGround(ground: GroundQuery): void {
+    for (let k = 0; k < BODY_POINTS.length; k++) {
+      const b = BODY_POINTS[k];
+      const wx = this.px + this.exx * b[0] + this.eyx * b[1] + this.ezx * b[2];
+      const wy = this.py + this.exy * b[0] + this.eyy * b[1] + this.ezy * b[2];
+      const wz = this.pz + this.exz * b[0] + this.eyz * b[1] + this.ezz * b[2];
+      const g = ground.sample(wx, wz, this.bodyHints[k]);
+      const n = g.normal;
+      const depth = (g.height - wy) * n.y;
+      if (depth <= 0) continue;
+      this.px += n.x * depth; this.py += n.y * depth; this.pz += n.z * depth;
+      const rx = wx - this.px, ry = wy - this.py, rz = wz - this.pz;
+      const vpx = this.vx + this.wy * rz - this.wz * ry;
+      const vpy = this.vy + this.wz * rx - this.wx * rz;
+      const vpz = this.vz + this.wx * ry - this.wy * rx;
+      const vn = vpx * n.x + vpy * n.y + vpz * n.z;
+      if (vn >= 0) continue;
+      const jn = -(1 + GROUND_E) * vn / this.invMassAlong(wx, wy, wz, n.x, n.y, n.z);
+      this.impulseAt(n.x * jn, n.y * jn, n.z * jn, rx, ry, rz);
+      // scraping friction
+      const tx = vpx - n.x * vn, ty = vpy - n.y * vn, tz = vpz - n.z * vn;
+      const tl = Math.hypot(tx, ty, tz);
+      if (tl > 1e-3) {
+        const ux = tx / tl, uy = ty / tl, uz = tz / tl;
+        const jt = Math.min(GROUND_MU * jn, tl / this.invMassAlong(wx, wy, wz, ux, uy, uz));
+        this.impulseAt(-ux * jt, -uy * jt, -uz * jt, rx, ry, rz);
       }
     }
   }

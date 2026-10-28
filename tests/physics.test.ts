@@ -261,6 +261,40 @@ describe('tyre temperature and ERS', () => {
   });
 });
 
+describe('rollover', () => {
+  it('stays upright on fresh softs with a slow steering ramp at 150 km/h', () => {
+    const car = makeCar('soft');
+    for (let i = 0; i < 240 * 30 && car.telemetry.speedKmh < 150; i++) car.step(DT, drive(car, { throttle: 1 }), flat, dry, false);
+    const up = new Vector3();
+    let minUp = 1, steer = 0;
+    for (let i = 0; i < 240 * 4; i++) {
+      steer = Math.min(1, steer + DT * 0.5);
+      car.step(DT, drive(car, { steer, throttle: 0.6 }), flat, dry, false);
+      up.set(0, 1, 0).applyQuaternion(car.pose.quaternion);
+      minUp = Math.min(minUp, up.y);
+    }
+    expect(minUp).toBeGreaterThan(0.9);
+  });
+
+  it('a car upside down slides on its body instead of sinking through the ground', () => {
+    const car = makeCar();
+    car.applyImpulse(new Vector3(0, 0, 40 * car.massKg), car.pose.position);
+    // flip it 180 degrees about the forward axis, 1.5 m up
+    const c = car as any;
+    c.qx = 0; c.qy = 0; c.qz = 1; c.qw = 0; c.py = 1.5;
+    let minY = Infinity;
+    for (let i = 0; i < 240 * 5; i++) {
+      car.step(DT, ctl(), flat, dry, false);
+      minY = Math.min(minY, car.pose.position.y);
+    }
+    // pose origin sits ~0.3 m below the CG, so upside down it is ~0.3 m above the CG's resting height
+    expect(c.py).toBeGreaterThan(0.4);
+    expect(c.py).toBeLessThan(1.2);
+    expect(minY).toBeGreaterThan(0);
+    expect(car.telemetry.speedKmh).toBeLessThan(144);
+  });
+});
+
 describe('collisions', () => {
   function body(id: string, x: number, z: number, car: Car | null): CollisionBody {
     return { id, position: new Vector3(x, 0, z), quaternion: new Quaternion(), velocity: new Vector3(), car };
