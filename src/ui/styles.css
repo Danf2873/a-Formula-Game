@@ -233,6 +233,7 @@ body, button, input, select { font-family: 'Titillium Web', 'Segoe UI', system-u
 .ers { display: flex; align-items: center; gap: 0.6em; }
 .ers-mode { font-weight: 700; font-size: 0.85em; letter-spacing: 0.1em; color: var(--yellow); padding: 0.1em 0.5em; border: 1px solid var(--yellow); border-radius: 2px; }
 .ers-mode.boost { background: var(--yellow); color: #000; box-shadow: 0 0 10px var(--yellow); }
+.ers-mode.harvest { color: var(--blue); border-color: var(--blue); }
 .bar { flex: 1; height: 0.6em; background: rgba(255, 255, 255, 0.1); border-radius: 2px; overflow: hidden; }
 .bar .fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--blue), #7fe0ff); }
 .ers-text { font-size: 0.85em; min-width: 3.5em; text-align: right; }
@@ -240,6 +241,8 @@ body, button, input, select { font-family: 'Titillium Web', 'Segoe UI', system-u
 .fuel { margin-right: auto; color: #cfd3dc; }
 .tag { padding: 0.1em 0.6em; border-radius: 2px; border: 1px solid var(--edge); color: var(--muted); font-weight: 700; letter-spacing: 0.08em; opacity: 0.35; }
 .tag.on { opacity: 1; color: #000; background: var(--green); border-color: var(--green); }
+.tag.map.on { background: transparent; color: var(--text); border-color: var(--edge); }
+.tag.clip.on { background: var(--blue); border-color: var(--blue); }
 .tag.warn.on { background: var(--yellow); border-color: var(--yellow); animation: blink 0.8s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0.5; } }
 

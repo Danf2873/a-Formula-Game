@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Quaternion, Vector3 } from 'three';
-import { Car, defaultSetup } from '../src/physics/car';
+import { Car, defaultSetup, ENGINE_MAPS } from '../src/physics/car';
 import { COMPOUNDS, newTyre, tyreForce } from '../src/physics/tyre';
 import { resolveCarCollisions, type CollisionBody } from '../src/physics/collisions';
 import type { Controls, Environment, GroundQuery, GroundSample } from '../src/types';
@@ -19,7 +19,6 @@ function ctl(p: Partial<Controls> = {}): Controls {
 function makeCar(compound: 'soft' | 'medium' | 'hard' | 'inter' | 'wet' = 'medium'): Car {
   const car = new Car({ setup: { ...defaultSetup(), startCompound: compound }, performance: PERF });
   car.reset(0, 0, 0, flat);
-  for (const t of car.tyres) t.tempC = COMPOUNDS[compound].optimalTempC;
   return car;
 }
 
@@ -32,10 +31,6 @@ function drive(car: Car, c: Partial<Controls>, upRpm = 11000): Controls {
   return out;
 }
 
-function keepWarm(car: Car): void {
-  for (const t of car.tyres) t.tempC = COMPOUNDS[t.compound].optimalTempC;
-}
-
 describe('tyre model', () => {
   it('has the specified compound colours', () => {
     expect(COMPOUNDS.soft.color).toBe('#e10600');
@@ -46,7 +41,7 @@ describe('tyre model', () => {
   });
 
   it('produces sane combined-slip forces', () => {
-    const t = newTyre('soft', 23); t.tempC = COMPOUNDS.soft.optimalTempC;
+    const t = newTyre('soft', 23);
     const pure = tyreForce(0, 0.1, 4000, t, 1, -0.05).fy;
     expect(pure).toBeLessThan(0);
     expect(Math.abs(pure) / 4000).toBeGreaterThan(2);
@@ -57,10 +52,8 @@ describe('tyre model', () => {
     const muLow = Math.abs(tyreForce(0, 0.1, 2000, t, 1, -0.05).fy) / 2000;
     const muHigh = Math.abs(tyreForce(0, 0.1, 8000, t, 1, -0.05).fy) / 8000;
     expect(muHigh).toBeLessThan(muLow);
-    // cold and worn tyres give less grip
-    const cold = newTyre('soft', 23); cold.tempC = 30;
-    expect(Math.abs(tyreForce(0, 0.1, 4000, cold, 1, -0.05).fy)).toBeLessThan(Math.abs(pure));
-    const worn = newTyre('soft', 23); worn.tempC = COMPOUNDS.soft.optimalTempC; worn.wear = 0.95;
+    // worn tyres give less grip
+    const worn = newTyre('soft', 23); worn.wear = 0.95;
     expect(Math.abs(tyreForce(0, 0.1, 4000, worn, 1, -0.05).fy)).toBeLessThan(0.8 * Math.abs(pure));
   });
 });
@@ -71,7 +64,6 @@ describe('car performance (flat ground)', () => {
     let t = 0;
     while (car.telemetry.speedKmh < 100 && t < 8) {
       car.step(DT, drive(car, { throttle: 1 }), flat, dry, false);
-      keepWarm(car);
       t += DT;
     }
     console.log('0-100 s', t.toFixed(2), 'gear', car.telemetry.gear);
@@ -85,7 +77,6 @@ describe('car performance (flat ground)', () => {
       car.ersSoc = 1;
       for (let i = 0; i < 240 * 70; i++) {
         car.step(DT, drive(car, { throttle: 1 }, 11300), flat, dry, straight);
-        if (i % 60 === 0) keepWarm(car);
         if (i % 2000 === 0) car.ersSoc = Math.max(car.ersSoc, 0.5);
       }
       return car.telemetry.speedKmh;
@@ -100,14 +91,12 @@ describe('car performance (flat ground)', () => {
     const car = makeCar();
     for (let i = 0; i < 240 * 40 && car.telemetry.speedKmh < 250; i++) {
       car.step(DT, drive(car, { throttle: 1 }), flat, dry, false);
-      if (i % 60 === 0) keepWarm(car);
     }
     let steer = 0, best = 0, avg = 0;
     for (let i = 0; i < 240 * 6; i++) {
       steer = Math.min(1, steer + DT * 0.12);
       const kmh = car.telemetry.speedKmh;
       car.step(DT, drive(car, { steer, throttle: kmh < 250 ? 0.6 : 0.0 }), flat, dry, false);
-      if (i % 60 === 0) keepWarm(car);
       avg += (car.telemetry.latG - avg) * DT * 4; // ~0.25 s smoothing
       if (kmh > 235 && kmh < 265) best = Math.max(best, avg);
       expect(Number.isFinite(car.pose.position.x)).toBe(true);
@@ -120,13 +109,11 @@ describe('car performance (flat ground)', () => {
     const car = makeCar();
     for (let i = 0; i < 240 * 40 && car.telemetry.speedKmh < 200; i++) {
       car.step(DT, drive(car, { throttle: 1 }), flat, dry, false);
-      if (i % 60 === 0) keepWarm(car);
     }
     const start = car.pose.position.clone();
     let yawMax = 0;
     for (let i = 0; i < 240 * 10 && car.telemetry.speedKmh > 0.5; i++) {
       car.step(DT, ctl({ brake: 1 }), flat, dry, false);
-      keepWarm(car);
       yawMax = Math.max(yawMax, Math.abs(car.pose.position.x - start.x));
     }
     const dist = car.pose.position.distanceTo(start);
@@ -167,14 +154,13 @@ describe('car performance (flat ground)', () => {
     const soc0 = car.ersSoc;
     for (let i = 0; i < 240 * 20; i++) {
       car.step(DT, drive(car, { throttle: 1 }), flat, dry, true);
-      if (i % 60 === 0) keepWarm(car);
     }
     expect(car.ersSoc).toBeLessThan(soc0);
     for (let i = 240 * 20; i < 240 * 60; i++) {
       car.step(DT, drive(car, { throttle: 1, steer: Math.sin(i / 240) * 0.4 }), flat, dry, false);
-      if (i % 60 === 0) keepWarm(car);
     }
-    expect(car.fuelKg).toBeLessThan(fuel0 - 4);
+    expect(car.fuelKg).toBeLessThan(fuel0 - 1);
+    expect(car.fuelKg).toBeGreaterThan(fuel0 - 2);
     expect(car.tyres[2].wear).toBeGreaterThan(0);
     console.log('wear', car.tyres.map((t) => t.wear.toExponential(2)), 'fuel', car.fuelKg.toFixed(2));
     const soc1 = car.ersSoc;
@@ -211,19 +197,101 @@ describe('car performance (flat ground)', () => {
       const car = makeCar(c);
       for (let i = 0; i < 240 * 40 && car.telemetry.speedKmh < 150; i++) {
         car.step(DT, drive(car, { throttle: 1 }), flat, env, false);
-        keepWarm(car);
       }
       let best = 0, steer = 0;
       for (let i = 0; i < 240 * 5; i++) {
         steer = Math.min(1, steer + DT * 0.15);
         car.step(DT, drive(car, { steer, throttle: car.telemetry.speedKmh < 150 ? 0.5 : 0 }), flat, env, false);
-        keepWarm(car);
         best = Math.max(best, car.telemetry.latG);
       }
       return best;
     };
     expect(g('soft', wet)).toBeLessThan(0.7 * g('soft', dry));
     expect(g('wet', wet)).toBeGreaterThan(g('soft', wet));
+  });
+});
+
+describe('tyre temperature and ERS', () => {
+  it('keeps tyres at their optimal temperature', () => {
+    for (const c of ['soft', 'medium', 'hard', 'inter', 'wet'] as const) {
+      expect(newTyre(c, 23).tempC).toBe(COMPOUNDS[c].optimalTempC);
+    }
+    const car = makeCar('soft');
+    for (let i = 0; i < 240 * 20; i++) car.step(DT, drive(car, { throttle: 1, steer: Math.sin(i / 200) * 0.6 }), flat, dry, false);
+    for (const t of car.tyres) expect(t.tempC).toBe(COMPOUNDS.soft.optimalTempC);
+    car.fitTyres('inter');
+    for (const t of car.tyres) expect(t.tempC).toBe(COMPOUNDS.inter.optimalTempC);
+  });
+
+  it('recharges the battery when lifting off the throttle', () => {
+    const car = makeCar();
+    for (let i = 0; i < 240 * 12; i++) car.step(DT, drive(car, { throttle: 1 }), flat, dry, false);
+    car.ersSoc = 0.3;
+    for (let i = 0; i < 240 * 2; i++) car.step(DT, ctl(), flat, dry, false);
+    expect(car.telemetry.ersHarvestKw).toBeGreaterThan(50);
+    expect(car.ersSoc).toBeGreaterThan(0.31);
+  });
+
+  it('super clips at full throttle on a low battery and selects engine maps', () => {
+    const top = (map: number, soc: number) => {
+      const car = makeCar();
+      let clipped = false, socEnd = 0;
+      for (let i = 0; i < 240 * 60; i++) {
+        car.ersSoc = Math.min(car.ersSoc, soc);
+        car.step(DT, drive(car, { throttle: 1, engineMap: map }, 11300), flat, dry, false);
+        clipped ||= car.telemetry.superClip;
+        socEnd = car.ersSoc;
+      }
+      return { v: car.telemetry.speedKmh, clipped, socEnd, map: car.telemetry.engineMap };
+    };
+    const charge = top(0, 0.3), quali = top(3, 0.3);
+    expect(charge.map).toBe(0);
+    expect(quali.map).toBe(3);
+    expect(charge.clipped).toBe(true);
+    expect(quali.clipped).toBe(false);
+    expect(charge.v).toBeLessThan(quali.v - 5);
+    // clipping charges the battery even flat out
+    const c2 = makeCar();
+    for (let i = 0; i < 240 * 40; i++) c2.step(DT, drive(c2, { throttle: 1, engineMap: 0 }, 11300), flat, dry, false);
+    const s0 = c2.ersSoc = 0.3;
+    for (let i = 0; i < 240 * 5; i++) c2.step(DT, drive(c2, { throttle: 1, engineMap: 0 }, 11300), flat, dry, false);
+    expect(c2.telemetry.superClip).toBe(true);
+    expect(c2.ersSoc).toBeGreaterThan(s0);
+    expect(ENGINE_MAPS.length).toBe(4);
+  });
+});
+
+describe('rollover', () => {
+  it('stays upright on fresh softs with a slow steering ramp at 150 km/h', () => {
+    const car = makeCar('soft');
+    for (let i = 0; i < 240 * 30 && car.telemetry.speedKmh < 150; i++) car.step(DT, drive(car, { throttle: 1 }), flat, dry, false);
+    const up = new Vector3();
+    let minUp = 1, steer = 0;
+    for (let i = 0; i < 240 * 4; i++) {
+      steer = Math.min(1, steer + DT * 0.5);
+      car.step(DT, drive(car, { steer, throttle: 0.6 }), flat, dry, false);
+      up.set(0, 1, 0).applyQuaternion(car.pose.quaternion);
+      minUp = Math.min(minUp, up.y);
+    }
+    expect(minUp).toBeGreaterThan(0.9);
+  });
+
+  it('a car upside down slides on its body instead of sinking through the ground', () => {
+    const car = makeCar();
+    car.applyImpulse(new Vector3(0, 0, 40 * car.massKg), car.pose.position);
+    // flip it 180 degrees about the forward axis, 1.5 m up
+    const c = car as any;
+    c.qx = 0; c.qy = 0; c.qz = 1; c.qw = 0; c.py = 1.5;
+    let minY = Infinity;
+    for (let i = 0; i < 240 * 5; i++) {
+      car.step(DT, ctl(), flat, dry, false);
+      minY = Math.min(minY, car.pose.position.y);
+    }
+    // pose origin sits ~0.3 m below the CG, so upside down it is ~0.3 m above the CG's resting height
+    expect(c.py).toBeGreaterThan(0.4);
+    expect(c.py).toBeLessThan(1.2);
+    expect(minY).toBeGreaterThan(0);
+    expect(car.telemetry.speedKmh).toBeLessThan(144);
   });
 });
 

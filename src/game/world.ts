@@ -156,6 +156,8 @@ export class World {
       if (simulateHere) {
         car = new Car({ setup, performance: team.performance });
         car.pitLimitKmh = track.data.pit.speedLimitKmh;
+        // Outside races the AI run on a fixed light fuel load (they would refuel in the garage).
+        car.fuelMul = !isPlayer && cfg.kind !== 'race' ? 0 : cfg.fuelMul;
         car.fitTyres(startCompound);
       }
       const visual = new CarVisual(team, driver.number, driver.code);
@@ -420,6 +422,7 @@ export class World {
     const kind = this.opts.config.kind;
     if (kind !== 'race') return false;
     if (r.nextStop < r.stops.length && lap >= r.stops[r.nextStop]) return true;
+    if (this.aiFuelNeeded(r, lap) > 0) return true;
     const t = r.car!.tyres;
     const wear = Math.max(...t.map((x) => x.wear));
     if (wear > 0.8) return true;
@@ -429,6 +432,19 @@ export class World {
     if (w > 0.45 && (c === 'soft' || c === 'medium' || c === 'hard')) return true;
     if (w < 0.15 && (c === 'inter' || c === 'wet')) return true;
     return false;
+  }
+
+  /** Fuel an AI car must take on to finish the race, or 0 if it has enough (with a lap of margin). */
+  private aiFuelNeeded(r: Racer, lap: number): number {
+    const cfg = this.opts.config;
+    if (cfg.kind !== 'race' || !r.car) return 0;
+    const perLap = fuelPerLap(cfg, this.track);
+    const lapsLeft = cfg.laps - lap + 1;
+    if (lapsLeft <= 0 || perLap <= 0) return 0;
+    const need = perLap * (lapsLeft + 0.5);
+    // Only stop for fuel once the tank is nearly empty, then fill to the end (capped by the tank).
+    if (r.car.fuelKg >= need || r.car.fuelKg > perLap * 1.5) return 0;
+    return Math.min(110 - r.car.fuelKg, need - r.car.fuelKg + perLap);
   }
 
   private nearby(self: Racer) {
@@ -503,6 +519,8 @@ export class World {
       const w = this.weather.state.wetness;
       compound = w > 0.6 ? 'wet' : w > 0.3 ? 'inter' : (r.stopCompounds[r.nextStop + 1] ?? 'hard');
       r.nextStop++;
+      const timing = this.session.snapshot().timing.find((t) => t.entryId === r.entry.id);
+      fuel = this.aiFuelNeeded(r, (timing?.lapsCompleted ?? 0) + 1);
     }
     const ms = PitStop.serviceTimeMs(compound !== null, fuel, this.rng);
     r.service = { untilMs: this.simMs + ms, compound, fuelKg: fuel };
@@ -623,10 +641,14 @@ function toNetState(r: Racer, t: number): NetCarState {
   };
 }
 
+/** Conservative fuel use per racing lap (kg); matches the car's fuel flow at racing pace. */
+function fuelPerLap(cfg: SessionConfig, track: Track): number {
+  return 2.3 * (track.length / 5800) * cfg.fuelMul;
+}
+
 function aiFuel(cfg: SessionConfig, track: Track): number {
   if (cfg.kind !== 'race') return 30;
-  const perLap = 1.6 * (track.length / 5800) * Math.max(cfg.fuelMul, 0.01);
-  return Math.min(110, Math.max(5, perLap * (cfg.laps + 1)));
+  return Math.min(110, Math.max(5, fuelPerLap(cfg, track) * (cfg.laps + 1)));
 }
 
 /** AI cars use a neutral setup (the player's tweaks shouldn't change the field). */

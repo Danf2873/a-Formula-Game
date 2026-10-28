@@ -2,6 +2,7 @@ import type { Entry, EntryTiming, SessionSnapshot, Telemetry, WeatherState } fro
 import { teamById, driverById } from '../data/grid';
 import { el, fmtLap, fmtSector, fmtGap, fmtClock, TYRE_COLORS, TYRE_LETTER } from './dom';
 import { getPrefs } from './prefs';
+import { ENGINE_MAPS } from '../physics/car';
 
 const REV_LEDS = 15;
 const REV_MIN = 6500, REV_MAX = 12200;
@@ -38,6 +39,7 @@ export class Hud {
   private speed: HTMLElement; private speedUnit: HTMLElement; private gear: HTMLElement;
   private leds: HTMLElement[] = [];
   private ersFill: HTMLElement; private ersText: HTMLElement; private ersMode: HTMLElement;
+  private engineMap: HTMLElement; private clip: HTMLElement;
   private fuel: HTMLElement; private straight: HTMLElement; private limiter: HTMLElement;
   private tyreBoxes: { box: HTMLElement; wear: HTMLElement; temp: HTMLElement }[] = [];
   private compoundDot: HTMLElement;
@@ -93,6 +95,8 @@ export class Hud {
 
     const flags = el('div', 'dash-flags', undefined, dash);
     this.fuel = el('span', 'mono fuel', '', flags);
+    this.engineMap = el('span', 'tag map on', '', flags);
+    this.clip = el('span', 'tag clip', 'SUPER CLIP', flags);
     this.straight = el('span', 'tag', 'STRAIGHT', flags);
     this.limiter = el('span', 'tag warn', 'PIT LIMITER', flags);
 
@@ -185,9 +189,14 @@ export class Hud {
     this.brkFill.style.height = Math.round(t.brake * 100) + '%';
 
     this.ersFill.style.width = Math.round(Math.max(0, Math.min(1, t.ersSoc)) * 100) + '%';
-    setText(this.ersText, `${Math.round(t.ersSoc * 100)}%  ${Math.round(t.ersDeployKw)} kW`);
+    const harvesting = t.ersHarvestKw > 5 && t.ersHarvestKw >= t.ersDeployKw;
+    const flowKw = harvesting ? t.ersHarvestKw : t.ersDeployKw;
+    setText(this.ersText, `${Math.round(t.ersSoc * 100)}%  ${harvesting ? '+' : ''}${Math.round(flowKw)} kW`);
     setCls(this.ersMode, 'boost', t.ersDeployKw > 350);
-    setText(this.ersMode, t.ersDeployKw > 350 ? 'BOOST' : t.ersDeployKw > 5 ? 'DEPLOY' : 'ERS');
+    setCls(this.ersMode, 'harvest', harvesting);
+    setText(this.ersMode, t.ersDeployKw > 350 ? 'BOOST' : harvesting ? 'HARVEST' : t.ersDeployKw > 5 ? 'DEPLOY' : 'ERS');
+    setText(this.engineMap, ENGINE_MAPS[t.engineMap]?.name ?? '');
+    setCls(this.clip, 'on', t.superClip);
 
     setText(this.fuel, `FUEL ${t.fuelKg.toFixed(1)} kg`);
     setCls(this.straight, 'on', t.straightMode);
