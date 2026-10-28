@@ -1,5 +1,6 @@
 // AI driver: drives a real physics car purely through Controls.
 import type { CarPose, Controls, Driver, ITrack, SessionPhase, Telemetry } from '../types';
+import { DEFAULT_ENGINE_MAP } from '../physics/car';
 
 export interface AIPerception {
   s: number; lateral: number; speed: number;            // self, from Track.project
@@ -144,6 +145,7 @@ export class AIDriver {
   private integ = 0;
   private shiftTimer = 1;
   private reactT = 0;
+  private engineMap = DEFAULT_ENGINE_MAP;
 
   // racecraft
   private tactical = 0;
@@ -225,6 +227,7 @@ export class AIDriver {
     const lx = 1 - 2 * (q.y * q.y + q.z * q.z), lz = 2 * (q.x * q.z - q.y * q.w);
     const speed = p.speed;
     const tel = p.telemetry;
+    c.engineMap = this.chooseEngineMap(tel.ersSoc);
 
     // ---- grid: hold with brakes on
     const held = p.phase === 'pre' || p.phase === 'lights' || p.phase === 'formation';
@@ -371,6 +374,15 @@ export class AIDriver {
     return c;
   }
 
+  /** CHARGE when the battery runs low, ATTACK when it is nearly full, BALANCED otherwise (with hysteresis). */
+  private chooseEngineMap(soc: number): number {
+    if (this.engineMap === 0) { if (soc > 0.35) this.engineMap = 1; }
+    else if (this.engineMap === 2) { if (soc < 0.6) this.engineMap = 1; }
+    else if (soc < 0.12) this.engineMap = 0;
+    else if (soc > 0.85) this.engineMap = 2;
+    return this.engineMap;
+  }
+
   // ------------------------------------------------------------------ gearbox
 
   private shiftOnly(c: Controls, tel: Telemetry, wantReverse: boolean): void {
@@ -427,6 +439,9 @@ export class AIDriver {
             // Keep enough speed to steer out from behind a slow or stopped car (a car that
             // brakes to a halt behind it can't move sideways), while there's a car length of room.
             if (ds > 6.5) c = Math.max(c, o.speed + 4 + (ds - 6.5) * 0.4);
+            // Already mostly beside it on the passing side: creep on so the car can finish steering out
+            // (stopping here left it wedged behind the car, reversing and retrying forever).
+            else if (Math.sign(-dl) === this.overtakeSide && Math.abs(dl) > 1.5) c = Math.max(c, o.speed + 3);
           }
           cap = Math.min(cap, c);
         } else if (this.overtakeId === o.id && this.overtakeHold > 0 && ds < 40) {

@@ -9,7 +9,7 @@ const ctl = (o: Partial<Controls> = {}): Controls => ({
 });
 const tel = (o: Partial<Telemetry> = {}): Telemetry => ({
   speedKmh: 200, rpm: 9000, gear: 4, throttle: 1, brake: 0, steer: 0, latG: 0, longG: 0, ersSoc: 0.5,
-  ersDeployKw: 0, fuelKg: 50, straightMode: false, tyres: [], wheelSlip: [0, 0, 0, 0], wheelLoadN: [0, 0, 0, 0],
+  ersDeployKw: 0, ersHarvestKw: 0, engineMap: 1, superClip: false, fuelKg: 50, straightMode: false, tyres: [], wheelSlip: [0, 0, 0, 0], wheelLoadN: [0, 0, 0, 0],
   surface: ['asphalt', 'asphalt', 'asphalt', 'asphalt'], pitLimiter: false, ...o,
 });
 

@@ -4,11 +4,11 @@ A low-poly Formula 1 racing sim that runs in the browser. It covers all 24 circu
 
 ## Features
 
-- **Physics:** a raycast vehicle with a Pacejka tyre model, suspension and anti-roll bars, aero, 2026 active aero (straight mode) and an ICE + ERS power unit.
+- **Physics:** a raycast vehicle with a Pacejka tyre model, suspension and anti-roll bars, aero, 2026 active aero (straight mode) and an ICE + ERS power unit with an 8 MJ battery, four engine maps (Charge, Balanced, Attack, Quali), regen under braking and lift-off, and super clipping at the end of straights.
 - **Input:** keyboard, gamepad or steering wheel through the Gamepad API, with rebinding, calibration and optional assists (auto gearbox, TC, ABS).
 - **Sessions:** practice, qualifying (Q1/Q2/Q3), race, time trial with a saved ghost, and a full Grand Prix weekend.
 - **AI:** AI drivers that follow a racing line, overtake and defend, and make pit stops.
-- **Strategy:** tyre compounds with wear and temperature, fuel, pit stops, and the two-compound rule.
+- **Strategy:** tyre compounds with wear (tyres always run at their optimal temperature), fuel, pit stops, and the two-compound rule.
 - **Weather and time of day:** rain, a track that gets wetter or dries, and day/night.
 - **Car setup and telemetry:** a setup editor with wings, ARB, springs, ride height, alignment, brakes, diff, pressures and fuel, plus live telemetry graphs.
 - **Multiplayer:** peer-to-peer with room codes, via WebRTC and PeerJS. No server is needed.
@@ -21,6 +21,7 @@ A low-poly Formula 1 racing sim that runs in the browser. It covers all 24 circu
 | Steer | A / D or ← / → |
 | Shift up / down | E / Q |
 | Boost (ERS override) | Space |
+| Cycle engine map | M |
 | Pit limiter | L |
 | Next / previous camera | C / V |
 | Pick a camera directly | 1–9, 0 |

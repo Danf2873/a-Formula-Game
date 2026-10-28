@@ -7,7 +7,7 @@ import type {
   TeamPerformance, TyreCompound, TyreState,
 } from '../types';
 import {
-  longitudinalStiffness, newTyre, stepTyre, surfaceGrip, surfaceRollingDrag, tyreForce, wetnessGrip,
+  COMPOUNDS, longitudinalStiffness, newTyre, stepTyre, surfaceGrip, surfaceRollingDrag, tyreForce, wetnessGrip,
 } from './tyre';
 
 export interface CarParams {
@@ -45,7 +45,7 @@ export const DEFAULT_CAR_PARAMS: CarParams = {
   maxSteerDeg: 17,
   icePowerKw: 400,
   ersPowerKw: 350,
-  ersCapacityMJ: 4,
+  ersCapacityMJ: 8,
   maxRpm: 11500,
   gearRatios: [4.26, 3.58, 3.01, 2.53, 2.12, 1.78, 1.50, 1.26],
   finalDrive: 3.5,
@@ -66,6 +66,32 @@ export function defaultSetup(): CarSetup {
   };
 }
 
+/**
+ * Engine (ERS) maps. Each trades deployment against harvesting:
+ *  - deployKw / taper: MGU-K deployment at full throttle, faded out between the taper speeds.
+ *  - clipKw: "super clipping" — at full throttle above clipFromKmh the MGU-K takes this much of the ICE's
+ *    output to recharge the battery (the car loses top speed), while the battery is below clipBelowSoc.
+ *  - coastKw: harvest when lifting off the throttle without braking.
+ */
+export interface EngineMap {
+  name: string;
+  deployKw: number;
+  taperFromKmh: number;
+  taperToKmh: number;
+  clipKw: number;
+  clipFromKmh: number;
+  clipBelowSoc: number;
+  coastKw: number;
+}
+
+export const ENGINE_MAPS: EngineMap[] = [
+  { name: 'CHARGE',   deployKw: 0,   taperFromKmh: 290, taperToKmh: 355, clipKw: 150, clipFromKmh: 250, clipBelowSoc: 1.0, coastKw: 300 },
+  { name: 'BALANCED', deployKw: 350, taperFromKmh: 290, taperToKmh: 355, clipKw: 120, clipFromKmh: 270, clipBelowSoc: 0.35, coastKw: 200 },
+  { name: 'ATTACK',   deployKw: 350, taperFromKmh: 300, taperToKmh: 360, clipKw: 60,  clipFromKmh: 300, clipBelowSoc: 0.15, coastKw: 120 },
+  { name: 'QUALI',    deployKw: 350, taperFromKmh: 310, taperToKmh: 365, clipKw: 0,   clipFromKmh: 999, clipBelowSoc: 0,   coastKw: 0 },
+];
+export const DEFAULT_ENGINE_MAP = 1;
+
 // ---------------------------------------------------------------- constants
 const G = 9.81;
 const RHO = 1.2;
@@ -79,6 +105,9 @@ const WHEEL_INERTIA = 1.6;     // kg m^2 incl. rotating driveline share
 const V_MIN_SLIP = 4.0;        // slip denominator floor, m/s
 const BRAKE_TORQUE_MAX = 25000; // total wheel brake torque at pressure 1.0, Nm
 const ERS_HARVEST_MAX_W = 350e3;
+const ERS_EFFICIENCY = 0.85;
+const COAST_REGEN_FORCE_N = 2500;
+const FUEL_FLOW_MAX = 0.025;    // kg/s at full throttle and high revs (~90 kg/h)
 const BODY_E = 0.2;
 
 const DEG = Math.PI / 180;
@@ -115,11 +144,14 @@ export class Car {
   readonly telemetry: Telemetry;
   tyres: TyreState[];
   fuelKg: number;
-  ersSoc = 0.6;
+  ersSoc = 1;
+  /** Index into ENGINE_MAPS. Controls.engineMap overrides it when set. */
+  engineMap = DEFAULT_ENGINE_MAP;
   setup: CarSetup;
   hold = false;
   pitLimitKmh = 80;
   tyreWearMul = 1;
+  fuelMul = 1;
 
   private p: CarParams;
   private perf: TeamPerformance;
@@ -151,6 +183,8 @@ export class Car {
   private steerAngle = 0;
   private aeroMode = 0; // 0 corner mode .. 1 straight mode
   private ersDeployW = 0;
+  private ersHarvestW = 0;
+  private superClip = false;
   private lastLatG = 0; private lastLongG = 0;
   private lastGround: GroundSample | null = null;
 
@@ -166,7 +200,7 @@ export class Car {
     };
     this.telemetry = {
       speedKmh: 0, rpm: IDLE_RPM, gear: 1, throttle: 0, brake: 0, steer: 0, latG: 0, longG: 0, ersSoc: this.ersSoc,
-      ersDeployKw: 0, fuelKg: this.fuelKg, straightMode: false, tyres: this.tyres, wheelSlip: [0, 0, 0, 0],
+      ersDeployKw: 0, ersHarvestKw: 0, engineMap: this.engineMap, superClip: false, fuelKg: this.fuelKg, straightMode: false, tyres: this.tyres, wheelSlip: [0, 0, 0, 0],
       wheelLoadN: [0, 0, 0, 0], surface: ['asphalt', 'asphalt', 'asphalt', 'asphalt'], pitLimiter: false,
     };
     this.rebuildGeometry();
@@ -186,7 +220,7 @@ export class Car {
 
   fitTyres(compound: TyreCompound): void {
     for (const t of this.tyres) {
-      t.compound = compound; t.wear = 0; t.tempC = 70; t.pressurePsi = this.setup.tyrePressurePsi;
+      t.compound = compound; t.wear = 0; t.tempC = COMPOUNDS[compound].optimalTempC; t.pressurePsi = this.setup.tyrePressurePsi;
     }
   }
 
@@ -204,7 +238,7 @@ export class Car {
     this.px = x + this.eyx * h; this.py = g.height + this.eyy * h; this.pz = z + this.eyz * h;
     this.vx = this.vy = this.vz = 0; this.wx = this.wy = this.wz = 0;
     this.gear = 1; this.shiftTimer = 0; this.rpm = IDLE_RPM; this.aeroMode = 0; this.steerAngle = 0;
-    this.ersDeployW = 0;
+    this.ersDeployW = 0; this.ersHarvestW = 0; this.superClip = false;
     this.refreshOutputs();
   }
 
@@ -362,6 +396,7 @@ export class Car {
     let throttle = clamp(c.throttle, 0, 1);
     let brake = clamp(c.brake, 0, 1);
     this.steerAngle = steer * p.maxSteerDeg * DEG;
+    if (c.engineMap !== undefined) this.engineMap = clamp(Math.round(c.engineMap), 0, ENGINE_MAPS.length - 1);
     const speed = Math.hypot(this.vx, this.vy, this.vz);
 
     if (this.hold) {
@@ -491,21 +526,29 @@ export class Car {
     // direction-correct drive: wheels must turn the way the gear points, otherwise slip the clutch
     let shaftTorque = 0; // engine+ERS torque on the crank, Nm
     let deployW = 0;
+    let clipW = 0;
     const vKmh = vmag * 3.6;
+    const map = ENGINE_MAPS[this.engineMap] ?? ENGINE_MAPS[DEFAULT_ENGINE_MAP];
     if (ratio !== 0 && this.shiftTimer <= 0 && fuelOk) {
       const rpm = this.rpm;
       const wEng = Math.max(rpm, 3000) * 0.10472;
       let limiter = 1;
       if (wheelRpm > p.maxRpm - 200) limiter = clamp((p.maxRpm - wheelRpm) / 200, 0, 1);
       const pIce = p.icePowerKw * 1000 * perf.power * icePowerShape(rpm);
-      // ERS deployment
+      // ERS deployment (boost overrides the map: full power, later taper, no clipping)
       let taper = 1;
-      if (!c.boost) taper = clamp((355 - vKmh) / (355 - 290), 0, 1);
+      if (!c.boost) taper = clamp((map.taperToKmh - vKmh) / (map.taperToKmh - map.taperFromKmh), 0, 1);
       else taper = clamp((372 - vKmh) / (372 - 320), 0, 1);
       const socFade = clamp(this.ersSoc * 20, 0, 1);
-      deployW = p.ersPowerKw * 1000 * throttle * taper * socFade;
+      const deployMaxW = c.boost ? p.ersPowerKw * 1000 : Math.min(map.deployKw, p.ersPowerKw) * 1000;
+      deployW = deployMaxW * throttle * taper * socFade;
+      // super clipping: flat out at the end of a straight the MGU-K harvests part of the ICE output
+      if (!c.boost && throttle > 0.9 && this.ersSoc < map.clipBelowSoc && this.gear > 0) {
+        clipW = map.clipKw * 1000 * clamp((vKmh - map.clipFromKmh) / 15, 0, 1);
+        if (clipW > 0) deployW *= 1 - clamp(clipW / 50e3, 0, 1);
+      }
       if (this.gear < 0) deployW = 0;
-      const pTot = (pIce * throttle + deployW);
+      const pTot = Math.max(0, pIce * throttle + deployW - clipW);
       shaftTorque = (pTot / wEng) * limiter;
       // engine braking when off throttle
       const eb = (1 - throttle) * (20 + 0.008 * this.rpm);
@@ -533,7 +576,7 @@ export class Car {
     }
     // fuel
     if (fuelOk) {
-      const rate = 0.11 * (0.12 + 0.88 * throttle * clamp(this.rpm / 10500, 0.4, 1));
+      const rate = FUEL_FLOW_MAX * this.fuelMul * (0.12 + 0.88 * throttle * clamp(this.rpm / 10500, 0.4, 1));
       this.fuelKg = Math.max(0, this.fuelKg - rate * dt);
     }
 
@@ -542,14 +585,25 @@ export class Car {
       const bt = BRAKE_TORQUE_MAX * s.brakePressure * brake;
       W[0].tbrake = bt * s.brakeBias * 0.5; W[1].tbrake = W[0].tbrake;
       W[2].tbrake = bt * (1 - s.brakeBias) * 0.5; W[3].tbrake = W[2].tbrake;
-      let harvest = 0;
-      if (brake > 0.05 && throttle < 0.05 && this.forwardSpeed() > 3) {
-        harvest = ERS_HARVEST_MAX_W * brake * clamp(this.forwardSpeed() / 40, 0, 1);
-        // small extra rear retarding torque from the MGU-K
-        const th = harvest / Math.max(this.forwardSpeed(), 10) * R * 0.5;
-        W[2].tbrake += th; W[3].tbrake += th;
+      // MGU-K regen under braking and when lifting off; nothing once the battery is full
+      let regen = 0;
+      const fwd = this.forwardSpeed();
+      if (throttle < 0.05 && fwd > 3 && this.ersSoc < 1) {
+        // brake-by-wire: under braking the MGU-K takes over part of the rear friction braking (up to its
+        // power limit), so the brake balance and stopping distance are unchanged
+        if (brake > 0.05) regen = Math.min(ERS_HARVEST_MAX_W, 2 * W[2].tbrake / R * fwd);
+        // lifting off at speed the MGU-K adds a mild engine-braking-like drag on the rear wheels
+        const coast = Math.min(map.coastKw * 1000, COAST_REGEN_FORCE_N * fwd) * clamp((fwd - 30) / 15, 0, 1);
+        if (coast > regen) {
+          const th = (coast - regen) / fwd * R * 0.5;
+          W[2].tbrake += th; W[3].tbrake += th;
+          regen = coast;
+        }
       }
-      const dSoc = (harvest * 0.85 - deployW) * dt / (p.ersCapacityMJ * 1e6);
+      const harvest = Math.min(regen + clipW, ERS_HARVEST_MAX_W);
+      this.ersHarvestW = harvest;
+      this.superClip = clipW > 0;
+      const dSoc = (harvest * ERS_EFFICIENCY - deployW) * dt / (p.ersCapacityMJ * 1e6);
       this.ersSoc = clamp(this.ersSoc + dSoc, 0, 1);
     }
 
@@ -631,7 +685,7 @@ export class Car {
       w.slipPower = Math.abs(f.fx * slipVelX) + Math.abs(f.fy * vlat);
       // combined slip metric for UI (1 = at peak)
       w.slip = Math.hypot(kappa / 0.11, alpha / 0.115);
-      stepTyre(tyre, w.slipPower, N, vmag, dt, env.airTempC, env.trackTempC, env.wetness, this.tyreWearMul * perf.tyreWear);
+      stepTyre(tyre, w.slipPower, N, vmag, dt, env.wetness, this.tyreWearMul * perf.tyreWear);
     }
 
     // ---- gravity
@@ -761,6 +815,9 @@ export class Car {
     t.longG = this.lastLongG;
     t.ersSoc = this.ersSoc;
     t.ersDeployKw = deployW * 0.001;
+    t.ersHarvestKw = this.hold ? 0 : this.ersHarvestW * 0.001;
+    t.engineMap = this.engineMap;
+    t.superClip = !this.hold && this.superClip;
     t.fuelKg = this.fuelKg;
     t.straightMode = straight && this.aeroMode > 0.5;
     t.tyres = this.tyres;

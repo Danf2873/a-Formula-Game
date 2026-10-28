@@ -40,7 +40,7 @@ export interface CarParams {
   maxSteerDeg: number;       // road-wheel lock, ~17
   icePowerKw: number;        // ~400
   ersPowerKw: number;        // 350
-  ersCapacityMJ: number;     // 4 (usable per lap budget handled via harvest)
+  ersCapacityMJ: number;     // 8; refilled by brake-by-wire regen, lift-off regen and super clipping
   maxRpm: number;            // 15000 (11000 is the 2026 limit; use 11500 redline feel)
   gearRatios: number[];      // 8 forward
   finalDrive: number;
@@ -78,9 +78,12 @@ export class Car {
   /** Freeze the car (pit stop / pre-race hold): zero velocities, ignore controls until released. */
   hold: boolean;
 }
+/** ERS engine maps (CHARGE, BALANCED, ATTACK, QUALI): deploy power/taper, super clipping and lift-off regen.
+ *  Selected with Controls.engineMap (players cycle with M; AI picks by battery level). */
+export const ENGINE_MAPS: EngineMap[];
 
-// src/physics/tyre.ts
-export const COMPOUNDS: Record<TyreCompound, { grip: number; wearRate: number; optimalTempC: number; tempWindowC: number; wetGrip: number; color: string }>;
+// src/physics/tyre.ts  (no thermal model: tyres always sit at optimalTempC)
+export const COMPOUNDS: Record<TyreCompound, { grip: number; wearRate: number; optimalTempC: number; wetGrip: number; color: string }>;
 export function newTyre(compound: TyreCompound, pressurePsi: number): TyreState;
 /** Pacejka-style combined-slip force. Returns local tyre forces in N (fx longitudinal, fy lateral). */
 export function tyreForce(slipRatio: number, slipAngle: number, loadN: number, tyre: TyreState, surfaceGrip: number, camberRad: number): { fx: number; fy: number };

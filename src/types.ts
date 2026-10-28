@@ -21,6 +21,7 @@ export interface Controls {
   shiftDown: boolean;   // edge-triggered
   boost: boolean;       // held: 2026 manual-override ERS deployment
   pitLimiter: boolean;  // toggle state (not edge)
+  engineMap?: number;   // selected ERS engine map (index into ENGINE_MAPS); undefined = keep the car's
 }
 
 export const NEUTRAL_CONTROLS: Controls = {
@@ -117,6 +118,9 @@ export interface Telemetry {
   longG: number;
   ersSoc: number;        // 0..1 battery state of charge
   ersDeployKw: number;
+  ersHarvestKw: number;  // MGU-K regen (braking, lift-off and super clipping)
+  engineMap: number;     // index into ENGINE_MAPS
+  superClip: boolean;    // MGU-K is taking ICE power to recharge at full throttle
   fuelKg: number;
   straightMode: boolean; // 2026 active aero low-drag mode engaged
   tyres: TyreState[];    // 4, wheel order

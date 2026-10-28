@@ -124,7 +124,7 @@ function project(track: ITrack, car: TestCar) {
 function telemetry(car: TestCar): Telemetry {
   return {
     speedKmh: car.v * 3.6, rpm: car.rpm(), gear: car.gear, throttle: 0, brake: 0, steer: 0, latG: 0, longG: 0,
-    ersSoc: 0.8, ersDeployKw: 0, fuelKg: 50, straightMode: false,
+    ersSoc: 0.8, ersDeployKw: 0, ersHarvestKw: 0, engineMap: 1, superClip: false, fuelKg: 50, straightMode: false,
     tyres: [0, 1, 2, 3].map(() => ({ compound: car.compound, wear: 0, tempC: 90, pressurePsi: 23 })),
     wheelSlip: [0, 0, 0, 0], wheelLoadN: [0, 0, 0, 0], surface: ['asphalt', 'asphalt', 'asphalt', 'asphalt'], pitLimiter: false,
   };

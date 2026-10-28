@@ -1,4 +1,5 @@
 import type { Controls, UiActions, InputDeviceKind } from '../types';
+import { DEFAULT_ENGINE_MAP, ENGINE_MAPS } from '../physics/car';
 import { filterKeyboardSteer, rampPedal } from './keyboardFilter';
 
 export type BindingKind = 'key' | 'button' | 'axis';
@@ -16,12 +17,12 @@ export interface InputSettings {
 }
 
 export const ACTIONS = [
-  'steer', 'throttle', 'brake', 'shiftUp', 'shiftDown', 'boost', 'pitLimiter', 'camera', 'lookBack', 'pause',
+  'steer', 'throttle', 'brake', 'shiftUp', 'shiftDown', 'boost', 'engineMap', 'pitLimiter', 'camera', 'lookBack', 'pause',
 ] as const;
 export type Action = typeof ACTIONS[number];
 export const ACTION_LABELS: Record<Action, string> = {
   steer: 'Steering', throttle: 'Throttle', brake: 'Brake', shiftUp: 'Shift up', shiftDown: 'Shift down',
-  boost: 'Boost (ERS)', pitLimiter: 'Pit limiter', camera: 'Camera', lookBack: 'Look back', pause: 'Pause',
+  boost: 'Boost (ERS)', engineMap: 'Engine map (cycle)', pitLimiter: 'Pit limiter', camera: 'Camera', lookBack: 'Look back', pause: 'Pause',
 };
 
 export function defaultSettings(): InputSettings {
@@ -39,7 +40,7 @@ const KEY_DEFAULTS: Record<string, string[]> = {
   throttle: ['KeyW', 'ArrowUp'], brake: ['KeyS', 'ArrowDown'],
   steerLeft: ['KeyA', 'ArrowLeft'], steerRight: ['KeyD', 'ArrowRight'],
   shiftUp: ['KeyE', 'ShiftRight'], shiftDown: ['KeyQ', 'ControlLeft', 'ControlRight'],
-  boost: ['Space'], pitLimiter: ['KeyL'], camera: ['KeyC'], lookBack: ['KeyB'], pause: ['Escape'],
+  boost: ['Space'], engineMap: ['KeyM'], pitLimiter: ['KeyL'], camera: ['KeyC'], lookBack: ['KeyB'], pause: ['Escape'],
 };
 
 interface PadDef { kind: 'button' | 'axis'; code: number; dir?: 1 | -1 }
@@ -48,7 +49,7 @@ const PAD_DEFAULTS: Record<Action, PadDef[]> = {
   throttle: [{ kind: 'button', code: 7 }], brake: [{ kind: 'button', code: 6 }],
   shiftUp: [{ kind: 'button', code: 0 }, { kind: 'button', code: 5 }],
   shiftDown: [{ kind: 'button', code: 2 }, { kind: 'button', code: 4 }],
-  boost: [{ kind: 'button', code: 1 }], pitLimiter: [{ kind: 'button', code: 14 }],
+  boost: [{ kind: 'button', code: 1 }], engineMap: [{ kind: 'button', code: 12 }], pitLimiter: [{ kind: 'button', code: 14 }],
   camera: [{ kind: 'button', code: 3 }], lookBack: [{ kind: 'button', code: 8 }], pause: [{ kind: 'button', code: 9 }],
 };
 
@@ -71,7 +72,7 @@ function wheelDefaults(id: string): Record<Action, PadDef[]> {
     steer: [{ kind: 'axis', code: 0, dir: 1 }],
     throttle: [p.throttle], brake: [p.brake],
     shiftUp: [{ kind: 'button', code: 4 }], shiftDown: [{ kind: 'button', code: 5 }],
-    boost: [{ kind: 'button', code: 0 }], pitLimiter: [{ kind: 'button', code: 2 }],
+    boost: [{ kind: 'button', code: 0 }], engineMap: [{ kind: 'button', code: 6 }], pitLimiter: [{ kind: 'button', code: 2 }],
     camera: [{ kind: 'button', code: 3 }], lookBack: [{ kind: 'button', code: 1 }], pause: [{ kind: 'button', code: 9 }],
   };
 }
@@ -105,6 +106,7 @@ export class InputManager {
   private thr = 0;
   private brk = 0;
   private pitLimiterOn = false;
+  private engineMap = DEFAULT_ENGINE_MAP;
   private prevButtons = new Map<number, boolean[]>();
   private prevAxes = new Map<number, number[]>();
   private capturing = false;
@@ -261,6 +263,7 @@ export class InputManager {
     const controls: Controls = { steer: 0, throttle: 0, brake: 0, shiftUp: false, shiftDown: false, boost: false, pitLimiter: this.pitLimiterOn };
     let deviceName = 'Keyboard';
     let toggleLimiter = false;
+    let cycleMap = false;
 
     if (device === 'keyboard' || !pad) {
       const left = heldKey('steerLeft') ? 1 : 0, right = heldKey('steerRight') ? 1 : 0;
@@ -273,6 +276,7 @@ export class InputManager {
       controls.shiftDown = edgeKey('shiftDown');
       controls.boost = heldKey('boost');
       toggleLimiter = edgeKey('pitLimiter');
+      cycleMap = edgeKey('engineMap');
     } else {
       const p = pad;
       deviceName = p.id.replace(/\(.*?\)/g, '').trim().slice(0, 48) || (device === 'wheel' ? 'Wheel' : 'Gamepad');
@@ -308,7 +312,10 @@ export class InputManager {
       controls.shiftDown = anyEdge('shiftDown');
       controls.boost = anyHeld('boost');
       toggleLimiter = anyEdge('pitLimiter');
+      cycleMap = anyEdge('engineMap');
     }
+    if (cycleMap) this.engineMap = (this.engineMap + 1) % ENGINE_MAPS.length;
+    controls.engineMap = this.engineMap;
     if (toggleLimiter) this.pitLimiterOn = !this.pitLimiterOn;
     controls.pitLimiter = this.pitLimiterOn;
 
